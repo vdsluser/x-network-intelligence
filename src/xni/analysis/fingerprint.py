@@ -7,10 +7,21 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from ..models import Account, AccountAssociation, AccountClassification, AccountTopic, Target, TargetRelationship
+from ..models import (
+    Account,
+    AccountAssociation,
+    AccountClassification,
+    AccountTopic,
+    Target,
+    TargetRelationship,
+)
 from .centrality import CentralNodeScore, rank_central_nodes
 from .classification.taxonomy import CLASSIFIER_VERSIONS
-from .network import find_new_account_cohort_pairs, find_similarity_pairs, get_active_following_sets
+from .network import (
+    find_new_account_cohort_pairs,
+    find_similarity_pairs,
+    get_active_following_sets,
+)
 from .profiles import analyze_account_profile
 
 
@@ -75,7 +86,12 @@ def _topic_metrics(counts: list[int]) -> tuple[float, float]:
     return concentration, diversity
 
 
-def _semantic_fields(session: Session, followed_account_ids: list[int], following_count: int, classifier_version: str) -> dict:
+def _semantic_fields(
+    session: Session,
+    followed_account_ids: list[int],
+    following_count: int,
+    classifier_version: str,
+) -> dict:
     if classifier_version not in CLASSIFIER_VERSIONS:
         raise ValueError(f"unsupported classifier_version: {classifier_version}")
     if not followed_account_ids:
@@ -94,12 +110,19 @@ def _semantic_fields(session: Session, followed_account_ids: list[int], followin
 
     topic_rows = session.execute(
         select(AccountTopic.topic, func.count(func.distinct(AccountTopic.account_id)))
-        .where(AccountTopic.account_id.in_(followed_account_ids), AccountTopic.classifier_version == classifier_version)
+        .where(
+            AccountTopic.account_id.in_(followed_account_ids),
+            AccountTopic.classifier_version == classifier_version,
+        )
         .group_by(AccountTopic.topic)
         .order_by(func.count(func.distinct(AccountTopic.account_id)).desc(), AccountTopic.topic)
     ).all()
     topic_distribution = [
-        TopicDistributionItem(topic=topic, account_count=count, share=(count / following_count if following_count else 0.0))
+        TopicDistributionItem(
+            topic=topic,
+            account_count=count,
+            share=(count / following_count if following_count else 0.0),
+        )
         for topic, count in topic_rows
     ]
     concentration, diversity = _topic_metrics([row.account_count for row in topic_distribution])
@@ -123,7 +146,11 @@ def _semantic_fields(session: Session, followed_account_ids: list[int], followin
     ).all()
     typed_total = sum(count for _, count in type_rows)
     account_type_distribution = [
-        AccountTypeDistributionItem(account_type=account_type, account_count=count, share=(count / typed_total if typed_total else 0.0))
+        AccountTypeDistributionItem(
+            account_type=account_type,
+            account_count=count,
+            share=(count / typed_total if typed_total else 0.0),
+        )
         for account_type, count in type_rows
     ]
 
@@ -165,7 +192,9 @@ def _semantic_fields(session: Session, followed_account_ids: list[int], followin
         "public_associations": public_associations,
         "classified_account_count": classified_account_count,
         "unclassified_account_count": unclassified_account_count,
-        "unclassified_ratio": unclassified_account_count / following_count if following_count else 0.0,
+        "unclassified_ratio": (
+            unclassified_account_count / following_count if following_count else 0.0
+        ),
         "classifier_version": classifier_version,
     }
 
@@ -186,14 +215,22 @@ def build_following_fingerprint(
         raise ValueError("top_node_limit must be at least 1")
 
     normalized_target = target_username.strip().lstrip("@")
-    target = session.scalar(select(Target).where(Target.username == normalized_target, Target.is_active.is_(True)))
+    target = session.scalar(
+        select(Target).where(
+            Target.username == normalized_target,
+            Target.is_active.is_(True),
+        )
+    )
     if target is None:
         raise ValueError(f"active target {normalized_target!r} not found")
 
     followed_accounts = session.scalars(
         select(Account)
         .join(TargetRelationship, TargetRelationship.account_id == Account.id)
-        .where(TargetRelationship.target_id == target.id, TargetRelationship.is_active.is_(True))
+        .where(
+            TargetRelationship.target_id == target.id,
+            TargetRelationship.is_active.is_(True),
+        )
     ).all()
     following_count = len(followed_accounts)
 
@@ -214,10 +251,13 @@ def build_following_fingerprint(
     following_sets = get_active_following_sets(session)
     own_set = following_sets.get(normalized_target, set())
     other_sets = [values for username, values in following_sets.items() if username != normalized_target]
-    shared_following_count = sum(1 for account_id in own_set if any(account_id in values for values in other_sets))
+    shared_following_count = sum(
+        1 for account_id in own_set if any(account_id in values for values in other_sets)
+    )
 
     similarity_pairs = [
-        pair for pair in find_similarity_pairs(session, min_jaccard=0.0, min_shared=0)
+        pair
+        for pair in find_similarity_pairs(session, min_jaccard=0.0, min_shared=0)
         if normalized_target in {pair.target_a, pair.target_b}
     ]
     best_similarity = similarity_pairs[0] if similarity_pairs else None
@@ -226,7 +266,11 @@ def build_following_fingerprint(
         similarity_jaccard = 0.0
         similarity_shared_count = 0
     else:
-        most_similar_target = best_similarity.target_b if best_similarity.target_a == normalized_target else best_similarity.target_a
+        most_similar_target = (
+            best_similarity.target_b
+            if best_similarity.target_a == normalized_target
+            else best_similarity.target_a
+        )
         similarity_jaccard = best_similarity.jaccard
         similarity_shared_count = best_similarity.shared_count
 
@@ -238,16 +282,26 @@ def build_following_fingerprint(
         min_jaccard=min_cohort_jaccard,
         min_shared=min_cohort_shared,
     )
-    cohort_peers = sorted({
-        pair.target_b if pair.target_a == normalized_target else pair.target_a
-        for pair in cohort_pairs if normalized_target in {pair.target_a, pair.target_b}
-    })
+    cohort_peers = sorted(
+        {
+            pair.target_b if pair.target_a == normalized_target else pair.target_a
+            for pair in cohort_pairs
+            if normalized_target in {pair.target_a, pair.target_b}
+        }
+    )
 
     all_followed_ids = set().union(*following_sets.values()) if following_sets else set()
     central_scores = rank_central_nodes(session, limit=max(1, len(all_followed_ids)))
-    own_central_scores = [score for score in central_scores if score.external_user_id in own_set][:top_node_limit]
+    own_central_scores = [score for score in central_scores if score.external_user_id in own_set][
+        :top_node_limit
+    ]
 
-    semantic = _semantic_fields(session, [account.id for account in followed_accounts], following_count, classifier_version)
+    semantic = _semantic_fields(
+        session,
+        [account.id for account in followed_accounts],
+        following_count,
+        classifier_version,
+    )
 
     return FollowingFingerprint(
         target=normalized_target,
@@ -279,7 +333,9 @@ def build_following_fingerprints(
     top_node_limit: int = 5,
     classifier_version: str = "rule-v1",
 ) -> list[FollowingFingerprint]:
-    usernames = session.scalars(select(Target.username).where(Target.is_active.is_(True)).order_by(Target.username)).all()
+    usernames = session.scalars(
+        select(Target.username).where(Target.is_active.is_(True)).order_by(Target.username)
+    ).all()
     return [
         build_following_fingerprint(
             session,
@@ -291,5 +347,6 @@ def build_following_fingerprints(
             min_cohort_shared=min_cohort_shared,
             top_node_limit=top_node_limit,
             classifier_version=classifier_version,
-        ) for username in usernames
+        )
+        for username in usernames
     ]
