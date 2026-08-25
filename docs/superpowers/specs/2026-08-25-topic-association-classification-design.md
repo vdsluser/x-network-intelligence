@@ -4,7 +4,7 @@
 
 This subsystem adds semantic meaning to the existing relationship graph without replacing the existing evidence-first network metrics. It classifies each observed X account by public topic signals, account type, and explicitly stated public associations, then extends Following Fingerprint with aggregate semantic distributions.
 
-The subsystem must remain local-first, deterministic by default, re-analysis friendly, and conservative about sensitive attributes.
+The subsystem remains local-first, deterministic by default, re-analysis friendly, and conservative about sensitive attributes.
 
 ## 2. Goals
 
@@ -28,9 +28,7 @@ The subsystem must remain local-first, deterministic by default, re-analysis fri
 
 ### 4.1 Evidence First
 
-Every classification result stores the exact public text fragment or metadata signal that caused the result.
-
-Example:
+Every classification result stores the public text fragment or metadata signal that caused the result.
 
 ```json
 {
@@ -42,20 +40,16 @@ Example:
 }
 ```
 
-### 4.2 Topic and Account Type Are Different Dimensions
+### 4.2 Topic and Account Type Are Separate Dimensions
 
-`topic` answers "what subject does this account publicly focus on?"
+`topic` answers what subject the account publicly focuses on. `account_type` answers what kind of public account it is.
 
-`account_type` answers "what kind of public account is this?"
-
-An account can therefore be:
+Examples:
 
 ```text
 account_type = Media
 topics = [PoliticsSociety, EconomyFinance]
 ```
-
-or:
 
 ```text
 account_type = Individual
@@ -64,7 +58,7 @@ topics = [AI, Technology]
 
 ### 4.3 Unknown Is Valid
 
-The engine must prefer `Unknown` over weak guesses. Coverage is measured explicitly so later rules or optional AI can focus only on unresolved accounts.
+The engine prefers `Unknown` over weak guesses. Coverage is measured explicitly so later rules or optional AI can focus only on unresolved accounts.
 
 ### 4.4 Sensitive Attributes
 
@@ -128,7 +122,7 @@ Initial association types:
 - `domain`
 - `declared_affiliation`
 
-`declared_affiliation` is only emitted when the public bio text explicitly states the affiliation. It must never be produced from follow relationships or topic co-occurrence.
+`declared_affiliation` is only emitted when public bio text explicitly states the affiliation. It must never be produced from follow relationships, topic co-occurrence, or graph structure.
 
 ## 7. Rule Engine
 
@@ -140,13 +134,13 @@ The rule engine consumes the existing normalized `Account` model, primarily:
 - `display_name`
 - `description`
 - `profile_image_url` only as metadata, never for image analysis
-- latest raw snapshot user JSON when optional fields such as `bio_urls` or `location` are available
+- latest raw `SnapshotMember.raw_json` when optional fields such as `bio_urls` or `location` are available
+
+The latest raw snapshot record is read locally from SQLite; the classifier performs no external HTTP requests.
 
 ### 7.2 Rule Representation
 
-Rules are Python data structures, not hard-coded nested conditionals.
-
-Conceptual shape:
+Rules are Python data structures rather than nested conditionals.
 
 ```python
 @dataclass(frozen=True)
@@ -157,31 +151,27 @@ class KeywordRule:
     evidence_source: str
 ```
 
-Rules must support case-insensitive matching and normalized whitespace. Korean and English keywords are both supported from rule-v1.
+Rules support case-insensitive matching, Unicode-safe text, and normalized whitespace. Korean and English keywords are both supported from rule-v1.
 
 ### 7.3 Confidence
 
 Rule-v1 confidence is deterministic and rule-defined, not probabilistic model confidence.
 
-Suggested bands:
-
 - explicit role phrase or explicit keyword pair: `0.95`
 - strong single-domain keyword: `0.85`
-- broad weak keyword: avoid or assign only if paired with another signal
+- broad weak keyword: persist only when paired with another signal
 
 No result below `0.70` is persisted in rule-v1.
 
 ### 7.4 Deduplication
 
-For the same `account_id + topic + classifier_version`, keep one row with the strongest confidence and combined evidence where useful.
+For the same `account_id + topic + classifier_version`, retain one logical result using the strongest confidence and relevant evidence.
 
-For associations, normalize values for deduplication while preserving the original evidence text.
+For associations, normalize values for deduplication while preserving original evidence text.
 
 ## 8. Persistence Model
 
 ### 8.1 `account_topics`
-
-Fields:
 
 ```text
 id
@@ -196,15 +186,13 @@ analyzed_at
 
 Constraints:
 
-- indexed by `account_id`
-- indexed by `topic`
-- unique logical result per `account_id + topic + classifier_version`
+- index `account_id`
+- index `topic`
+- unique `account_id + topic + classifier_version`
 
 ### 8.2 `account_classifications`
 
-Stores the primary account type separately from topics.
-
-Fields:
+Primary account type:
 
 ```text
 id
@@ -219,11 +207,9 @@ analyzed_at
 
 Constraint:
 
-- one primary classification per `account_id + classifier_version`
+- unique `account_id + classifier_version`
 
 ### 8.3 `account_associations`
-
-Fields:
 
 ```text
 id
@@ -246,8 +232,6 @@ account_id + association_type + normalized_value + classifier_version
 
 ### 8.4 `classification_runs`
 
-Fields:
-
 ```text
 id
 classifier_version
@@ -267,18 +251,14 @@ This is the audit trail for re-analysis.
 
 Classification is derived data. Raw account and snapshot data remain the source of truth.
 
-A classification run may operate in two modes:
+A classification run operates in one of two modes:
 
 - `replace_version`: delete and rebuild derived results for the selected classifier version.
 - `new_version`: preserve old results and write a new classifier version.
 
-Rule-v1 implementation uses `replace_version` by default so repeated runs are idempotent.
-
-Historical raw JSON is not modified.
+Rule-v1 uses `replace_version` by default so repeated runs are idempotent. Historical raw JSON is never modified.
 
 ## 10. Service Boundaries
-
-Planned modules:
 
 ```text
 src/xni/analysis/classification/
@@ -336,7 +316,7 @@ Response:
 GET /api/analysis/topics
 ```
 
-Returns topic counts and coverage across currently stored accounts.
+Returns topic counts and coverage across stored accounts for the requested classifier version.
 
 ### 11.3 Association Aggregate
 
@@ -344,7 +324,7 @@ Returns topic counts and coverage across currently stored accounts.
 GET /api/analysis/associations?type=organization&limit=50
 ```
 
-Returns normalized public association values with account counts and evidence count.
+Returns normalized public association values with account counts and evidence counts.
 
 ### 11.4 Account Classification Detail
 
@@ -356,7 +336,7 @@ Returns primary type, topics, associations, evidence, confidence, and classifier
 
 ## 12. Following Fingerprint v2
 
-The existing network fingerprint remains the base. Semantic fields are added without changing the meaning of existing metrics.
+The existing network fingerprint remains the base. Semantic fields are added without changing the meaning of existing network metrics.
 
 New fields:
 
@@ -375,27 +355,41 @@ classifier_version
 
 ### 12.1 Topic Distribution
 
-For a target, count topic membership across currently active followed accounts.
+For a target, count non-Unknown topic membership across currently active followed accounts.
 
-Because accounts may have multiple topics, topic percentages are presented as "share of followed accounts tagged with this topic", not as a partition that must sum to 100%.
+Display percentage for topic `T`:
+
+```text
+followed_accounts_tagged_T / total_active_followed_accounts
+```
+
+Because an account may have multiple topics, displayed topic percentages may sum to more than 100%.
 
 ### 12.2 Account Type Distribution
 
-Account type is single-primary-label, so its distribution is a normal partition among classified followed accounts.
+Account type is one primary label per account/version. Its distribution is therefore a normal partition of followed accounts that have a stored classification row. `Unknown` remains visible as its own type.
 
 ### 12.3 Topic Concentration
 
-Use normalized HHI over the topic tag count shares for rule-v1:
+HHI requires a probability distribution that sums to 1, so it is **not** computed directly from the display percentages above.
+
+First compute tag-assignment weights:
 
 ```text
-HHI = sum(p_i^2)
+p_i = assignments_for_topic_i / total_non_unknown_topic_assignments
 ```
 
-Expose the raw HHI as `topic_concentration`.
+Then:
+
+```text
+topic_concentration = sum(p_i^2)
+```
+
+This is raw HHI in the range `(0, 1]` when at least one non-Unknown topic assignment exists, otherwise `0.0`.
 
 ### 12.4 Topic Diversity
 
-Use normalized Shannon entropy where possible:
+Using the same normalized tag-assignment weights:
 
 ```text
 H = -sum(p_i * ln(p_i))
@@ -406,9 +400,19 @@ Return `0.0` when fewer than two nonzero topics exist.
 
 These metrics describe public topic-tag distribution only. They must not be described as ideological concentration or belief diversity.
 
-### 12.5 Public Association Summary
+### 12.5 Classification Coverage
 
-Return top explicitly extracted public associations for the target's followed accounts:
+For Fingerprint v2:
+
+- `classified_account_count`: active followed accounts with at least one non-Unknown topic for the selected classifier version.
+- `unclassified_account_count`: active followed accounts with no non-Unknown topic for that version.
+- `unclassified_ratio`: `unclassified_account_count / following_count`, with `0.0` when `following_count == 0`.
+
+Account-type `Unknown` is still shown separately in `account_type_distribution`; it does not redefine the topic coverage fields above.
+
+### 12.6 Public Association Summary
+
+Return top explicitly extracted public associations for the target's active followed accounts:
 
 ```json
 {
@@ -424,8 +428,8 @@ Return top explicitly extracted public associations for the target's followed ac
 - Missing account detail: HTTP 404.
 - Empty database: classification run returns zero counts, not an error.
 - Invalid association type query: HTTP 400.
-- Rule parsing errors are treated as programmer errors and covered by tests; no partial database commit.
-- One classification run is committed transactionally so a failed run does not leave a mixed version state.
+- Rule parsing errors are programmer errors covered by tests; no partial database commit.
+- One classification run is committed transactionally so a failed run cannot leave a mixed version state.
 
 ## 14. Testing Strategy
 
@@ -434,7 +438,7 @@ Return top explicitly extracted public associations for the target's followed ac
 - topic rule matching in Korean and English
 - multiple topics from one bio
 - deterministic account-type priority
-- Unknown behavior for ambiguous/empty bios
+- Unknown behavior for ambiguous or empty bios
 - explicit association extraction
 - no `declared_affiliation` from follow graph data
 - normalized association deduplication
@@ -457,19 +461,17 @@ Return top explicitly extracted public associations for the target's followed ac
 
 ### Fingerprint v2 tests
 
-- topic distribution for a target
+- topic distribution with multi-tag percentages
 - account type distribution
-- HHI concentration
+- HHI computed from normalized topic assignments
 - normalized entropy diversity
 - association aggregation
-- unclassified ratio
-- existing fingerprint fields remain unchanged
+- topic-based unclassified ratio
+- existing Fingerprint v1 fields remain unchanged
 
 ### Regression
 
-Run the full existing pytest suite after each task.
-
-GitHub Actions are not required for this subsystem; local pytest/compile verification remains the default.
+Run the full existing pytest suite after each implementation task. GitHub Actions are not required; local pytest and Python compile verification remain the default.
 
 ## 15. Rollout Sequence
 
@@ -491,13 +493,13 @@ The subsystem is ready when:
 - the same SQLite database can be reclassified deterministically with `rule-v1`;
 - every persisted semantic result has evidence, confidence, and classifier version;
 - unresolved accounts remain explicitly measurable as Unknown/unclassified;
-- a target fingerprint can show network metrics and semantic topic/type/association summaries together;
+- a target Fingerprint can show network metrics and semantic topic/type/association summaries together;
 - no sensitive-trait inference is produced from follow relationships;
 - all new tests and the existing full suite pass locally.
 
 ## 17. Future Extension: Optional AI Resolver
 
-AI is deliberately excluded from rule-v1. If added later, it will process only unresolved accounts and must emit the same normalized output schema with:
+AI is deliberately excluded from rule-v1. If added later, it processes only unresolved accounts and emits the same normalized output schema with:
 
 ```text
 source = ai_model
@@ -507,4 +509,4 @@ evidence
 confidence
 ```
 
-AI output must not override explicit rule evidence silently. The UI/API must remain able to distinguish rule-derived and model-derived results.
+AI output must not silently override explicit rule evidence. The UI/API must remain able to distinguish rule-derived and model-derived results.
