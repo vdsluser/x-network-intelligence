@@ -87,9 +87,12 @@ class ExpansionCandidate(Base):
     promoted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     promoted_target_id: Mapped[int | None] = mapped_column(ForeignKey("targets.id"), nullable=True)
 
+
 class AccountTopic(Base):
     __tablename__ = "account_topics"
-    __table_args__ = (UniqueConstraint("account_id", "topic", "classifier_version", name="uq_account_topic_version"),)
+    __table_args__ = (
+        UniqueConstraint("account_id", "topic", "classifier_version", name="uq_account_topic_version"),
+    )
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     account_id: Mapped[int] = mapped_column(ForeignKey("accounts.id"), index=True, nullable=False)
     topic: Mapped[str] = mapped_column(String(64), index=True, nullable=False)
@@ -101,7 +104,9 @@ class AccountTopic(Base):
 
 class AccountClassification(Base):
     __tablename__ = "account_classifications"
-    __table_args__ = (UniqueConstraint("account_id", "classifier_version", name="uq_account_classification_version"),)
+    __table_args__ = (
+        UniqueConstraint("account_id", "classifier_version", name="uq_account_classification_version"),
+    )
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     account_id: Mapped[int] = mapped_column(ForeignKey("accounts.id"), index=True, nullable=False)
     account_type: Mapped[str] = mapped_column(String(64), index=True, nullable=False)
@@ -113,7 +118,12 @@ class AccountClassification(Base):
 
 class AccountAssociation(Base):
     __tablename__ = "account_associations"
-    __table_args__ = (UniqueConstraint("account_id", "association_type", "normalized_value", "classifier_version", name="uq_account_association_version"),)
+    __table_args__ = (
+        UniqueConstraint(
+            "account_id", "association_type", "normalized_value", "classifier_version",
+            name="uq_account_association_version",
+        ),
+    )
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     account_id: Mapped[int] = mapped_column(ForeignKey("accounts.id"), index=True, nullable=False)
     association_type: Mapped[str] = mapped_column(String(64), index=True, nullable=False)
