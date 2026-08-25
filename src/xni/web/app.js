@@ -1,4 +1,4 @@
-import { c as cytoscape } from "/static/vendor/cytoscape.min.js";
+import cytoscape from "/static/vendor/cytoscape.min.js";
 
 const $ = (id) => document.getElementById(id);
 const controls = {
