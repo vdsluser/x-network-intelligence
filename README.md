@@ -1,6 +1,6 @@
 # X Network Intelligence
 
-X 계정의 공개 팔로잉 관계망을 로컬에 축적하고 **관심 주제, 관계 군집, 중심노드, 신생계정 코호트, 관계 변화**를 분석하는 로컬 네트워크 인텔리전스 프로젝트입니다.
+X 계정의 공개 팔로잉 관계망을 로컬 SQLite에 축적하고 **관계 변화, 신생계정 코호트, Following 유사도, 중심노드, 공개 주제·계정 유형·명시적 공개 관계**를 근거와 함께 분석하는 로컬 네트워크 인텔리전스 프로젝트입니다.
 
 ## 현재 기술 구조
 
@@ -38,93 +38,147 @@ python -m xni
 
 상태 확인: `http://127.0.0.1:8000/api/health`
 
-## 수동 Following Snapshot 가져오기
+## 수동 Following Snapshot
 
-Sorsa 형태의 `users`, `targetLabel`, `mode: "following"` JSON을 `POST /api/import/manual`에 전달합니다. 원본 payload와 각 user JSON을 SQLite에 함께 보존하고, 두 번째 Snapshot부터 `added / removed / unchanged`를 계산합니다.
+Sorsa 형태의 `users`, `targetLabel`, `mode: "following"` JSON을 `POST /api/import/manual`에 전달합니다. 원본 payload와 각 user JSON을 SQLite에 보존하고, 두 번째 Snapshot부터 `added / removed / unchanged`를 계산합니다.
+
+여러 Target JSON은 `POST /api/import/manual/batch`로 한 번에 넣을 수 있습니다. Batch Import 후 Expansion Queue와 Similarity/Cohort/Central Node 요약을 다시 계산합니다.
 
 ## Network Expansion Queue
 
-신생·저팔로잉 후보를 로컬 추적 대상으로 확장하는 워크플로를 제공합니다.
+신생·저팔로잉 후보를 로컬 추적 대상으로 확장합니다.
 
 ```text
 관측 Account
-  → New Account 후보 판별
+  → 신생·저팔로잉 후보 판별
   → Expansion Queue(pending)
-  → 사용자가 Target으로 승격
-  → 해당 Target의 Following JSON 수집
-  → Batch Import
+  → Target 승격
+  → 해당 Target의 Following JSON 추가 Import
   → Similarity / Cohort / Central Node 재분석
 ```
 
 주요 API:
 
-- `POST /api/expansion/queue/refresh` — 현재 계정 데이터에서 후보 큐 갱신
-- `GET /api/expansion/queue?status=pending` — 대기 후보 조회
-- `POST /api/expansion/queue/{candidate_id}/promote` — 후보를 로컬 Target으로 승격
-- `POST /api/import/manual/batch` — 여러 Target JSON을 순차 저장하고 큐/분석 요약 반환
+- `POST /api/expansion/queue/refresh`
+- `GET /api/expansion/queue?status=pending`
+- `POST /api/expansion/queue/{candidate_id}/promote`
+- `POST /api/import/manual/batch`
 
-`promote`는 X에서 실제 Follow를 수행하거나 외부 서비스에 요청하지 않습니다. SQLite의 로컬 `targets` 테이블에 추적 대상을 등록하는 동작만 수행합니다.
+`promote`는 X에서 실제 Follow를 수행하지 않습니다. SQLite의 로컬 추적 Target만 생성합니다.
 
-배치 요청은 `payloads`, `new_account_days`, `low_following_max`, `min_jaccard`, `min_shared`, `central_limit`을 받을 수 있습니다. 응답에는 각 Import 결과, Queue 갱신 결과, Target 수, 활성 관계 수, Similarity/Cohort 쌍 수와 상위 Central Node가 포함됩니다.
+## Semantic Classification — rule-v1
 
-## 분석 API
+STEP 6부터 공개 bio와 이미 저장된 snapshot metadata를 규칙 기반으로 분석합니다. **외부 웹 요청이나 AI 호출 없이 로컬 데이터만 사용**합니다.
 
-### 신생·저팔로잉 후보
+Topic과 Account Type은 별개 차원입니다. 예를 들어 한 계정은 `account_type=Media`이면서 `topics=[MediaJournalism, EconomyFinance]`일 수 있습니다.
 
-`GET /api/analysis/new-accounts?new_account_days=90&low_following_max=100`
+초기 Topic에는 AI, Technology, EconomyFinance, Investment, Business, MediaJournalism, PoliticsSociety, PublicAffairs, Crypto, Sports, Entertainment, Creator, Organization, ScienceResearch, Education, CultureArts 등이 포함됩니다. Account Type은 `Individual / Media / Company / Organization / PublicFigure / Creator / FanAccount / Unknown` 중 하나입니다.
 
-계정 생성일과 현재 팔로잉 수만 사용합니다. `90일`, `100`은 판정 사실이 아니라 사용자가 바꿀 수 있는 분석 기준값입니다.
+모든 저장 결과에는 다음 근거가 붙습니다.
 
-### Following 유사도
+- `source`
+- `evidence`
+- `confidence`
+- `classifier_version`
+- `analyzed_at`
 
-`GET /api/analysis/similarity?min_jaccard=0.2&min_shared=2`
+애매한 계정은 억지로 분류하지 않고 `Unknown` 또는 미분류로 남깁니다.
 
-두 추적 대상의 활성 Following 집합을 비교해 `shared_count`, `union_count`, `jaccard`, `overlap_a`, `overlap_b`를 반환합니다.
+### 분류 실행
 
-### 신생계정 Cohort 후보
+```text
+POST /api/analysis/classify
+```
 
-`GET /api/analysis/cohorts?new_account_days=90&low_following_max=100&min_jaccard=0.2&min_shared=2`
+기본 요청:
 
-신생·저팔로잉 후보 중 둘 다 실제 추적 대상으로 Following Snapshot이 축적된 경우에만 관계 유사도를 비교합니다. 높은 점수는 관계망 유사성 신호이며 조직성이나 동일 세력을 의미한다고 단정하지 않습니다.
+```json
+{
+  "classifier_version": "rule-v1",
+  "replace_version": true
+}
+```
 
-### 중심노드
+같은 `rule-v1`을 다시 실행하면 해당 버전의 파생 결과를 재생성하므로 중복 누적되지 않습니다. 원본 Account와 Snapshot JSON은 수정하지 않습니다.
 
-`GET /api/analysis/central-nodes?limit=20`
+### 분류 조회 API
 
-활성 `Target → Account` 관계를 NetworkX graph로 구성해 `followed_by_targets`, `target_coverage`, `betweenness`를 반환합니다. 여러 타깃의 Snapshot이 쌓일수록 의미가 커집니다.
+- `GET /api/analysis/topics?classifier_version=rule-v1`
+- `GET /api/analysis/associations?type=organization&limit=50&classifier_version=rule-v1`
+- `GET /api/accounts/{account_id}/classification?classifier_version=rule-v1`
 
-### Following Fingerprint
+Public Association은 bio 또는 저장된 URL metadata에 **명시된 공개 정보**만 추출합니다. `declared_affiliation`은 `member of ...`, `소속: ...`처럼 명시적인 문구가 있을 때만 생성하며 Following 관계, Cohort, 중심노드로부터 개인의 정치·종교 등 민감한 속성을 추론하지 않습니다.
 
-각 활성 Target의 현재 관계망을 하나의 비교 가능한 프로필로 계산합니다. 별도 캐시 테이블을 만들지 않고 현재 SQLite 관계 데이터를 기준으로 즉시 계산합니다.
+## Network Analysis API
 
-- `GET /api/analysis/fingerprints` — 모든 활성 Target의 Fingerprint 조회
-- `GET /api/analysis/fingerprints/{target_username}` — 한 Target의 Fingerprint 조회
+- `GET /api/analysis/new-accounts?new_account_days=90&low_following_max=100`
+- `GET /api/analysis/similarity?min_jaccard=0.2&min_shared=2`
+- `GET /api/analysis/cohorts?new_account_days=90&low_following_max=100&min_jaccard=0.2&min_shared=2`
+- `GET /api/analysis/central-nodes?limit=20`
 
-주요 필드:
+Similarity는 Jaccard와 공통 Following 수/비율을 근거로 제공합니다. Cohort와 중심노드 결과는 관계망 신호이며 조직성·동일 세력을 의미한다고 단정하지 않습니다.
 
-- `following_count` — 현재 관측된 활성 Following 수
-- `new_account_count`, `new_account_ratio` — 설정한 기간 기준 신생계정 수와 비율
-- `new_low_following_count`, `new_low_following_ratio` — 신생계정 중 팔로잉 수도 설정 기준 이하인 계정 수와 비율
-- `shared_following_count` — 다른 활성 Target도 함께 팔로우하는 계정 수
-- `shared_network_concentration` — 전체 Following 중 공통 관계망 계정이 차지하는 비율
-- `most_similar_target` — Following Jaccard가 가장 높은 다른 Target
-- `similarity_jaccard`, `similarity_shared_count` — 최고 유사 Target과의 유사도 근거
-- `cohort_peers`, `cohort_peer_count` — 설정 기준을 만족하는 신생계정 Cohort 연결
-- `top_central_nodes` — 해당 Target이 팔로우하는 계정 중 전체 관계망에서 중심성이 높은 노드
+## Following Fingerprint v2
 
-예: `GET /api/analysis/fingerprints/alpha?new_account_days=90&low_following_max=100&top_node_limit=5`
+각 활성 Target의 네트워크 지표와 semantic 지표를 하나의 프로필로 조회합니다.
 
-`shared_network_concentration`은 주제나 정치 성향의 집중도를 뜻하지 않습니다. 현재 단계에서는 **여러 추적 Target 사이에서 실제 Following 관계가 얼마나 겹치는지**만 나타내는 관찰 가능한 네트워크 지표입니다. 주제 기반 관심사 집중도는 Topic Classification 기능이 추가된 뒤 별도 지표로 확장합니다.
+- `GET /api/analysis/fingerprints?classifier_version=rule-v1`
+- `GET /api/analysis/fingerprints/{target_username}?classifier_version=rule-v1`
 
-## SQLite에 보존하는 데이터
+기존 Network Fingerprint 필드:
 
-- `targets` — 추적 대상
-- `accounts` — 발견된 X 계정과 최신 공개 메타데이터
-- `following_snapshots` — 수집 시점과 전체 원본 JSON
-- `snapshot_members` — 각 Snapshot 계정과 원본 user JSON
-- `target_relationships` — 활성/비활성 팔로잉 관계
-- `relationship_events` — added / removed 변화 이벤트
-- `expansion_candidates` — 신생·저팔로잉 확장 후보와 pending/promoted 상태
+- `following_count`
+- `new_account_count`, `new_account_ratio`
+- `new_low_following_count`, `new_low_following_ratio`
+- `shared_following_count`, `shared_network_concentration`
+- `most_similar_target`, `similarity_jaccard`, `similarity_shared_count`
+- `cohort_peers`
+- `top_central_nodes`
+
+v2 Semantic 필드:
+
+- `topic_distribution`
+- `account_type_distribution`
+- `top_topics`
+- `topic_concentration`
+- `topic_diversity`
+- `public_associations`
+- `classified_account_count`
+- `unclassified_account_count`
+- `unclassified_ratio`
+- `classifier_version`
+
+`topic_distribution`은 한 계정이 여러 Topic을 가질 수 있어 표시 비율 합계가 100%를 넘을 수 있습니다. `topic_concentration`은 Topic assignment를 정규화한 뒤 계산한 HHI이고, `topic_diversity`는 정규화 Shannon entropy입니다. 이 값들은 **공개 bio에서 분류된 주제의 분포**만 설명하며 정치적 성향·사상·신념의 집중도나 다양성을 뜻하지 않습니다.
+
+## SQLite 주요 테이블
+
+기본/관계망:
+
+- `targets`
+- `accounts`
+- `following_snapshots`
+- `snapshot_members`
+- `target_relationships`
+- `relationship_events`
+- `expansion_candidates`
+
+Semantic derived data:
+
+- `account_topics`
+- `account_classifications`
+- `account_associations`
+- `classification_runs`
+
+분류 결과는 파생 데이터입니다. 원본 Snapshot JSON을 유지하므로 규칙 버전이 개선되면 다시 분석할 수 있습니다.
+
+## 분석 원칙
+
+- **Evidence First**: 가능한 모든 결과에 근거 문구와 수치를 연결합니다.
+- **Rule First, AI Optional**: rule-v1은 결정론적 규칙 기반이며 AI를 사용하지 않습니다.
+- **Unknown Is Valid**: 근거가 부족하면 미분류 상태를 유지합니다.
+- **Sensitive Attribute Guard**: Following 관계만으로 개인의 정치·종교 등 민감한 속성을 임의로 추정하지 않습니다.
+- **Relationship Signals, Not Claims**: 유사도·Cohort·중심노드는 측정값이며 조직성·조작 여부의 확정 판정이 아닙니다.
+- **Re-analysis Ready**: classifier version과 원본 JSON을 보존해 재분석할 수 있게 합니다.
 
 ## 핵심 기능 로드맵
 
@@ -135,46 +189,33 @@ Sorsa 형태의 `users`, `targetLabel`, `mode: "following"` JSON을 `POST /api/i
 5. ✅ New Account Cohort Pair Detection
 6. ✅ Central Node / Bridge Signal
 7. ✅ Network Expansion Queue / Target Promotion / Batch Import
-8. ✅ Following Fingerprint
-9. Topic & Public Association Classification
-10. Local Relationship Graph UI
-11. Network Trend / Rising Node Analysis
-
-## 분석 원칙
-
-- 개인의 정치·종교 등 민감한 속성을 임의로 단정하지 않습니다.
-- bio 등에 명시적으로 공개된 소속·관심 표현은 근거와 함께 기록할 수 있습니다.
-- 조직성·세력 여부를 확정하지 않고, 팔로잉 유사도·공통 팔로잉 비율·계정 생성 시기·중심노드 집중도 같은 측정 가능한 신호를 제공합니다.
-- 분석 기준값은 휴리스틱이며 사용자가 변경할 수 있게 유지합니다.
-- 원본 데이터를 보존해 분석 알고리즘 개선 후 재분석할 수 있게 설계합니다.
-
-## 데이터 Provider
-
-- `ManualImportProvider` — JSON 수동 가져오기
-- `SorsaProvider` — 정식 API Adapter(향후)
-- 향후 추가 Provider
-
-비공식 Playground endpoint 자동 호출을 기본 Provider로 구현하지 않습니다.
+8. ✅ Following Fingerprint v1
+9. ✅ Topic / Account Type / Public Association Classification rule-v1
+10. ✅ Following Fingerprint v2 Semantic Metrics
+11. ⏭ Local Cytoscape Relationship Graph UI
+12. Network Trend / Rising Node / Emerging Hub
 
 ## 문서
 
 - [Project Plan](docs/PROJECT_PLAN.md)
-- [Network Expansion Queue Plan](docs/superpowers/plans/2026-08-25-network-expansion-queue.md)
+- [Topic & Public Association Classification Design](docs/superpowers/specs/2026-08-25-topic-association-classification-design.md)
+- [Topic & Public Association Classification Implementation Plan](docs/superpowers/plans/2026-08-25-topic-association-classification.md)
 
 ## 현재 상태
 
-**STEP 5 — Following Fingerprint**
+**STEP 6 — Semantic Network Intelligence**
 
-현재 구현:
+구현 범위:
 
-- `python -m xni` 로컬 실행
-- FastAPI Snapshot Import / Batch Import
-- SQLite Snapshot + Relationship Diff
-- 신생·저팔로잉 후보 분석
-- Following Jaccard 유사도 / Cohort 후보
-- NetworkX 중심노드 / betweenness 신호
-- Expansion Queue pending/promoted 관리
-- 후보 → 로컬 Target 승격
-- Batch Import 후 자동 Queue 갱신 및 네트워크 분석 요약
-- Target별 Following Fingerprint 및 전체 Fingerprint 조회
-- pytest 회귀 테스트
+- Snapshot / Relationship Diff
+- Expansion Queue / Batch Import
+- Following Similarity / Cohort / Centrality
+- Following Fingerprint v1
+- bilingual deterministic `rule-v1` Topic Classification
+- deterministic primary Account Type Classification
+- explicit Public Association Extraction
+- versioned classification re-analysis and audit run
+- Topic / Association / Account detail API
+- Following Fingerprint v2 semantic distribution, HHI, diversity, associations
+
+다음 단계는 **STEP 7 — Cytoscape 기반 Local Relationship Graph UI**입니다.
