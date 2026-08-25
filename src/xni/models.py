@@ -85,3 +85,21 @@ class RelationshipEvent(Base):
     snapshot_id: Mapped[int] = mapped_column(ForeignKey("following_snapshots.id"), index=True, nullable=False)
     event_type: Mapped[str] = mapped_column(String(16), nullable=False)
     observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class ExpansionCandidate(Base):
+    __tablename__ = "expansion_candidates"
+    __table_args__ = (UniqueConstraint("account_id", name="uq_expansion_candidate_account"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    account_id: Mapped[int] = mapped_column(ForeignKey("accounts.id"), index=True, nullable=False)
+    status: Mapped[str] = mapped_column(String(16), default="pending", index=True, nullable=False)
+    reason: Mapped[str] = mapped_column(String(64), default="new_low_following", nullable=False)
+    age_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    following_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    new_account_days: Mapped[int] = mapped_column(Integer, nullable=False)
+    low_following_max: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    promoted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    promoted_target_id: Mapped[int | None] = mapped_column(ForeignKey("targets.id"), nullable=True)
