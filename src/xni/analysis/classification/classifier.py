@@ -35,6 +35,7 @@ def _keyword_match(text: str, keyword: str) -> str | None:
     normalized_keyword = normalize_text(keyword)
     if not normalized_keyword:
         return None
+    # ASCII short keywords use token boundaries so `ai` does not match `email`.
     if normalized_keyword.isascii() and re.fullmatch(r"[A-Za-z0-9_+#.-]+", normalized_keyword):
         pattern = rf"(?<![A-Za-z0-9_]){re.escape(normalized_keyword)}(?![A-Za-z0-9_])"
         match = re.search(pattern, text, flags=re.IGNORECASE)
