@@ -65,25 +65,14 @@ class AccountClassificationDetail(BaseModel):
     associations: list[AssociationDetail]
 
 
-class TopicAggregate(BaseModel):
-    topic: str
-    account_count: int
-    coverage: float
-
-
-class AssociationAggregate(BaseModel):
-    association_type: str
-    value: str
-    normalized_value: str
-    account_count: int
-    evidence_count: int
-
-
 def _latest_raw_by_account(session: Session) -> dict[int, dict[str, Any]]:
     rows = session.execute(
         select(SnapshotMember.account_id, SnapshotMember.raw_json)
         .join(FollowingSnapshot, FollowingSnapshot.id == SnapshotMember.snapshot_id)
-        .order_by(FollowingSnapshot.collected_at.desc(), SnapshotMember.snapshot_id.desc())
+        .order_by(
+            FollowingSnapshot.collected_at.desc(),
+            SnapshotMember.snapshot_id.desc(),
+        )
     ).all()
     result: dict[int, dict[str, Any]] = {}
     for account_id, raw_json in rows:
@@ -96,7 +85,10 @@ def _validate_version(version: str) -> None:
         raise ValueError(f"unsupported classifier_version: {version}")
 
 
-def run_classification(session: Session, request: ClassificationRunRequest) -> ClassificationRunSummary:
+def run_classification(
+    session: Session,
+    request: ClassificationRunRequest,
+) -> ClassificationRunSummary:
     _validate_version(request.classifier_version)
     version = request.classifier_version
     started_at = datetime.now(timezone.utc)
@@ -146,13 +138,9 @@ def run_classification(session: Session, request: ClassificationRunRequest) -> C
 
             if account.id not in existing_types:
                 session.add(AccountClassification(
-                    account_id=account.id,
-                    account_type=type_match.account_type,
-                    source=type_match.source,
-                    evidence=type_match.evidence,
-                    confidence=type_match.confidence,
-                    classifier_version=version,
-                    analyzed_at=analyzed_at,
+                    account_id=account.id, account_type=type_match.account_type,
+                    source=type_match.source, evidence=type_match.evidence,
+                    confidence=type_match.confidence, classifier_version=version, analyzed_at=analyzed_at,
                 ))
                 existing_types.add(account.id)
 
@@ -161,13 +149,9 @@ def run_classification(session: Session, request: ClassificationRunRequest) -> C
                 if key in existing_topics:
                     continue
                 session.add(AccountTopic(
-                    account_id=account.id,
-                    topic=match.topic,
-                    source=match.source,
-                    evidence=match.evidence,
-                    confidence=match.confidence,
-                    classifier_version=version,
-                    analyzed_at=analyzed_at,
+                    account_id=account.id, topic=match.topic, source=match.source,
+                    evidence=match.evidence, confidence=match.confidence,
+                    classifier_version=version, analyzed_at=analyzed_at,
                 ))
                 existing_topics.add(key)
                 topics_created += 1
@@ -177,39 +161,26 @@ def run_classification(session: Session, request: ClassificationRunRequest) -> C
                 if key in existing_associations:
                     continue
                 session.add(AccountAssociation(
-                    account_id=account.id,
-                    association_type=match.association_type,
-                    value=match.value,
-                    normalized_value=match.normalized_value,
-                    source=match.source,
-                    evidence=match.evidence,
-                    confidence=match.confidence,
-                    classifier_version=version,
-                    analyzed_at=analyzed_at,
+                    account_id=account.id, association_type=match.association_type,
+                    value=match.value, normalized_value=match.normalized_value, source=match.source,
+                    evidence=match.evidence, confidence=match.confidence,
+                    classifier_version=version, analyzed_at=analyzed_at,
                 ))
                 existing_associations.add(key)
                 associations_created += 1
 
         completed_at = datetime.now(timezone.utc)
         session.add(ClassificationRun(
-            classifier_version=version,
-            parameters_json=request.model_dump(),
-            accounts_processed=len(accounts),
-            accounts_with_topics=accounts_with_topics,
-            accounts_unknown=len(accounts) - accounts_with_topics,
-            topics_created=topics_created,
-            associations_created=associations_created,
-            started_at=started_at,
-            completed_at=completed_at,
+            classifier_version=version, parameters_json=request.model_dump(),
+            accounts_processed=len(accounts), accounts_with_topics=accounts_with_topics,
+            accounts_unknown=len(accounts) - accounts_with_topics, topics_created=topics_created,
+            associations_created=associations_created, started_at=started_at, completed_at=completed_at,
         ))
 
     return ClassificationRunSummary(
-        classifier_version=version,
-        accounts_processed=len(accounts),
-        accounts_with_topics=accounts_with_topics,
-        accounts_unknown=len(accounts) - accounts_with_topics,
-        topics_created=topics_created,
-        associations_created=associations_created,
+        classifier_version=version, accounts_processed=len(accounts),
+        accounts_with_topics=accounts_with_topics, accounts_unknown=len(accounts)-accounts_with_topics,
+        topics_created=topics_created, associations_created=associations_created,
     )
 
 
@@ -232,12 +203,18 @@ def get_account_classification_detail(
     )
     topics = session.scalars(
         select(AccountTopic)
-        .where(AccountTopic.account_id == account_id, AccountTopic.classifier_version == classifier_version)
+        .where(
+            AccountTopic.account_id == account_id,
+            AccountTopic.classifier_version == classifier_version,
+        )
         .order_by(AccountTopic.topic)
     ).all()
     associations = session.scalars(
         select(AccountAssociation)
-        .where(AccountAssociation.account_id == account_id, AccountAssociation.classifier_version == classifier_version)
+        .where(
+            AccountAssociation.account_id == account_id,
+            AccountAssociation.classifier_version == classifier_version,
+        )
         .order_by(AccountAssociation.association_type, AccountAssociation.normalized_value)
     ).all()
 
@@ -257,7 +234,8 @@ def get_account_classification_detail(
                 evidence=row.evidence,
                 confidence=row.confidence,
                 classifier_version=row.classifier_version,
-            ) for row in topics
+            )
+            for row in topics
         ],
         associations=[
             AssociationDetail(
@@ -268,12 +246,30 @@ def get_account_classification_detail(
                 evidence=row.evidence,
                 confidence=row.confidence,
                 classifier_version=row.classifier_version,
-            ) for row in associations
+            )
+            for row in associations
         ],
     )
 
+class TopicAggregate(BaseModel):
+    topic: str
+    account_count: int
+    coverage: float
 
-def list_topic_aggregates(session: Session, *, classifier_version: str = "rule-v1") -> list[TopicAggregate]:
+
+class AssociationAggregate(BaseModel):
+    association_type: str
+    value: str
+    normalized_value: str
+    account_count: int
+    evidence_count: int
+
+
+def list_topic_aggregates(
+    session: Session,
+    *,
+    classifier_version: str = "rule-v1",
+) -> list[TopicAggregate]:
     _validate_version(classifier_version)
     total_accounts = session.scalar(select(func.count()).select_from(Account)) or 0
     rows = session.execute(
@@ -283,7 +279,11 @@ def list_topic_aggregates(session: Session, *, classifier_version: str = "rule-v
         .order_by(func.count(func.distinct(AccountTopic.account_id)).desc(), AccountTopic.topic)
     ).all()
     return [
-        TopicAggregate(topic=topic, account_count=count, coverage=(count / total_accounts if total_accounts else 0.0))
+        TopicAggregate(
+            topic=topic,
+            account_count=count,
+            coverage=(count / total_accounts if total_accounts else 0.0),
+        )
         for topic, count in rows
     ]
 
@@ -303,13 +303,16 @@ def list_association_aggregates(
     if limit < 1:
         raise ValueError("limit must be at least 1")
 
-    stmt = select(
-        AccountAssociation.association_type,
-        AccountAssociation.normalized_value,
-        func.min(AccountAssociation.value),
-        func.count(func.distinct(AccountAssociation.account_id)),
-        func.count(AccountAssociation.id),
-    ).where(AccountAssociation.classifier_version == classifier_version)
+    stmt = (
+        select(
+            AccountAssociation.association_type,
+            AccountAssociation.normalized_value,
+            func.min(AccountAssociation.value),
+            func.count(func.distinct(AccountAssociation.account_id)),
+            func.count(AccountAssociation.id),
+        )
+        .where(AccountAssociation.classifier_version == classifier_version)
+    )
     if association_type is not None:
         stmt = stmt.where(AccountAssociation.association_type == association_type)
     stmt = (
