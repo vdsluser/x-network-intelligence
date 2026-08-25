@@ -36,60 +36,57 @@ python -m pip install -e ".[dev]"
 python -m xni
 ```
 
-상태 확인:
-
-```text
-http://127.0.0.1:8000/api/health
-```
+상태 확인: `http://127.0.0.1:8000/api/health`
 
 ## 수동 Following Snapshot 가져오기
 
-현재 MVP는 Sorsa Playground 등에서 확인한 **응답 JSON 객체 자체**를 수동으로 가져올 수 있습니다. `users`, `targetLabel`, `mode: "following"`을 포함한 JSON을 그대로 `POST /api/import/manual`에 전달합니다.
+Sorsa 형태의 `users`, `targetLabel`, `mode: "following"` JSON을 `POST /api/import/manual`에 전달합니다. 원본 payload와 각 user JSON을 SQLite에 함께 보존하고, 두 번째 Snapshot부터 `added / removed / unchanged`를 계산합니다.
 
-예시:
+## 분석 API
 
-```json
-{
-  "users": [
-    {
-      "id": "123",
-      "username": "alice",
-      "display_name": "Alice",
-      "description": "AI researcher",
-      "followers_count": 100,
-      "followings_count": 20,
-      "created_at": "Sun Nov 05 08:05:40 +0000 2023",
-      "tweets_count": 200,
-      "verified": false,
-      "protected": false,
-      "profile_image_url": "https://example.com/alice.jpg"
-    }
-  ],
-  "targetLabel": "target_user",
-  "mode": "following"
-}
+### 신생·저팔로잉 후보
+
+```text
+GET /api/analysis/new-accounts?new_account_days=90&low_following_max=100
 ```
 
-응답 예:
+계정 생성일과 현재 팔로잉 수만 사용합니다. `90일`, `100`은 판정 사실이 아니라 사용자가 바꿀 수 있는 분석 기준값입니다.
 
-```json
-{
-  "target": "target_user",
-  "snapshot_id": 1,
-  "total": 1,
-  "added": 1,
-  "removed": 0,
-  "unchanged": 0
-}
+### Following 유사도
+
+```text
+GET /api/analysis/similarity?min_jaccard=0.2&min_shared=2
 ```
 
-두 번째 Snapshot부터 직전 활성 관계와 비교해 다음 값을 계산합니다.
+두 추적 대상의 활성 Following 집합을 비교해 다음 근거를 반환합니다.
 
-- `added`: 새롭게 관측된 팔로잉
-- `removed`: 이전 Snapshot에는 있었으나 현재 Snapshot에서 보이지 않는 관계
-- `unchanged`: 두 Snapshot에 모두 존재하는 관계
+- `shared_count`
+- `union_count`
+- `jaccard`
+- `overlap_a`
+- `overlap_b`
 
-`removed`는 관측 결과이며, 계정이 왜 관계에서 사라졌는지까지 단정하지 않습니다.
+### 신생계정 Cohort 후보
+
+```text
+GET /api/analysis/cohorts?new_account_days=90&low_following_max=100&min_jaccard=0.2&min_shared=2
+```
+
+신생·저팔로잉 후보 중 **둘 다 실제 추적 대상으로 Following Snapshot이 축적된 경우**에만 관계 유사도를 비교합니다. 높은 점수는 관계망 유사성 신호이며 조직성이나 동일 세력을 의미한다고 단정하지 않습니다.
+
+### 중심노드
+
+```text
+GET /api/analysis/central-nodes?limit=20
+```
+
+활성 `Target → Account` 관계를 NetworkX bipartite graph로 구성해 다음 값을 반환합니다.
+
+- `followed_by_targets`: 몇 개의 추적 대상이 해당 계정을 팔로우하는지
+- `target_coverage`: 전체 추적 대상 중 연결 비율
+- `betweenness`: 관계망에서 매개 경로에 위치하는 정도
+
+추적 대상이 1개뿐이면 모든 연결 계정의 `target_coverage`가 1.0이므로 중심노드 비교의 의미가 제한됩니다. 여러 타깃의 Snapshot이 쌓일수록 가치가 커집니다.
 
 ## SQLite에 보존하는 데이터
 
@@ -100,30 +97,28 @@ http://127.0.0.1:8000/api/health
 - `target_relationships` — 현재 활성/비활성 팔로잉 관계와 최초/최근 관측 시점
 - `relationship_events` — added / removed 변화 이벤트
 
-원본 JSON을 함께 보관하므로 향후 분석 알고리즘을 개선한 뒤 과거 Snapshot을 다시 분석할 수 있습니다.
-
 ## 핵심 기능 로드맵
 
 1. ✅ Target / Account / Snapshot 저장
 2. ✅ Relationship Diff
-3. Following Similarity
-4. Following Fingerprint
-5. New Account Cohort Analysis
-6. Central Node / Bridge Node / Rising Node
-7. Topic & Public Association Classification
-8. Local Relationship Graph
-9. Network Trend Analysis
+3. ✅ New Account Candidate Analysis
+4. ✅ Following Similarity
+5. ✅ New Account Cohort Pair Detection
+6. ✅ Central Node / Bridge Signal
+7. Following Fingerprint
+8. Topic & Public Association Classification
+9. Local Relationship Graph UI
+10. Network Trend / Rising Node Analysis
 
 ## 분석 원칙
 
 - 개인의 정치·종교 등 민감한 속성을 임의로 단정하지 않습니다.
 - bio 등에 명시적으로 공개된 소속·관심 표현은 근거와 함께 기록할 수 있습니다.
 - 조직성·세력 여부를 확정하지 않고, 팔로잉 유사도·공통 팔로잉 비율·계정 생성 시기·중심노드 집중도 같은 측정 가능한 신호를 제공합니다.
+- 분석 기준값은 휴리스틱이며 사용자가 변경할 수 있게 유지합니다.
 - 원본 데이터를 보존해 분석 알고리즘 개선 후 재분석할 수 있게 설계합니다.
 
 ## 데이터 Provider
-
-Provider는 교체 가능한 인터페이스로 분리합니다.
 
 - `ManualImportProvider` — JSON 수동 가져오기
 - `SorsaProvider` — 정식 API Adapter(향후)
@@ -136,20 +131,20 @@ Provider는 교체 가능한 인터페이스로 분리합니다.
 - [Project Plan](docs/PROJECT_PLAN.md)
 - [Python Local MVP Implementation Plan](docs/superpowers/plans/2026-08-25-python-local-mvp.md)
 - [Manual Import + Snapshot Diff Plan](docs/superpowers/plans/2026-08-25-manual-import-snapshot.md)
+- [Network Analysis Core Plan](docs/superpowers/plans/2026-08-25-network-analysis-core.md)
 
 ## 현재 상태
 
-**STEP 2 — Manual Import + Snapshot Diff**
+**STEP 3 — Network Analysis Core**
 
 현재 구현:
 
 - `python -m xni` 로컬 실행
 - FastAPI `/api/health`
 - FastAPI `POST /api/import/manual`
-- SQLite 자동 초기화
-- Sorsa 형태 JSON → 내부 `NetworkAccount` 정규화
-- 계정 메타데이터 및 원본 JSON 저장
-- Snapshot별 관계 저장
-- added / removed / unchanged Diff
-- 관계 변화 이벤트 이력
-- pytest 테스트
+- Snapshot + Relationship Diff
+- 신생·저팔로잉 후보 분석
+- Following Jaccard 유사도
+- 신생계정 Cohort 후보 pair
+- NetworkX 중심노드 / betweenness 신호
+- pytest 회귀 테스트
