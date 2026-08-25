@@ -114,3 +114,50 @@ def test_analysis_endpoints_return_observable_network_metrics(tmp_path: Path) ->
     assert central.status_code == 200
     assert central.json()[0]["username"] in {"two", "three"}
     assert central.json()[0]["target_coverage"] == 1.0
+
+
+def _batch_user(account_id: str, username: str) -> dict:
+    return {
+        "id": account_id,
+        "username": username,
+        "display_name": username.title(),
+        "description": "candidate",
+        "followers_count": 10,
+        "followings_count": 20,
+        "created_at": "Mon Aug 24 00:00:00 +0000 2026",
+        "tweets_count": 20,
+        "verified": False,
+        "protected": False,
+        "profile_image_url": None,
+    }
+
+
+def test_expansion_queue_workflow_and_batch_import_endpoints(tmp_path: Path) -> None:
+    settings = Settings(database_path=tmp_path / "x_network.db")
+    body = {
+        "payloads": [
+            {"users": [_batch_user("1", "shared")], "targetLabel": "alpha", "mode": "following"},
+            {"users": [_batch_user("1", "shared"), _batch_user("2", "candidate")], "targetLabel": "beta", "mode": "following"},
+        ],
+        "new_account_days": 90,
+        "low_following_max": 100,
+        "min_jaccard": 0.0,
+        "min_shared": 1,
+        "central_limit": 5,
+    }
+
+    with TestClient(create_app(settings)) as client:
+        batch = client.post("/api/import/manual/batch", json=body)
+        queue = client.get("/api/expansion/queue")
+        candidate_id = next(item["id"] for item in queue.json() if item["username"] == "candidate")
+        promoted = client.post(f"/api/expansion/queue/{candidate_id}/promote")
+        promoted_queue = client.get("/api/expansion/queue", params={"status": "promoted"})
+
+    assert batch.status_code == 200
+    assert batch.json()["analysis"]["targets"] == 2
+    assert batch.json()["analysis"]["central_nodes"][0]["username"] == "shared"
+    assert queue.status_code == 200
+    assert {item["username"] for item in queue.json()} == {"shared", "candidate"}
+    assert promoted.status_code == 200
+    assert promoted.json()["target_username"] == "candidate"
+    assert {item["username"] for item in promoted_queue.json()} == {"candidate"}
