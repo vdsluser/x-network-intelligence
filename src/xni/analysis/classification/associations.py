@@ -80,6 +80,7 @@ def extract_associations(
     text = unicodedata.normalize("NFKC", description or "")
     bucket: dict[tuple[str, str], AssociationMatch] = {}
 
+    # Explicit @mentions are observable public references, not inferred affiliations.
     for match in re.finditer(r"(?<![\w@])@([A-Za-z0-9_]{2,64})", text):
         _add(
             bucket,
@@ -96,8 +97,16 @@ def extract_associations(
     )
     for pattern in role_patterns:
         for match in re.finditer(pattern, text, flags=re.IGNORECASE):
-            _add(bucket, "role", match.group(1), source="bio_role", evidence=match.group(0), confidence=0.95)
+            _add(
+                bucket,
+                "role",
+                match.group(1),
+                source="bio_role",
+                evidence=match.group(0),
+                confidence=0.95,
+            )
 
+    # Explicit affiliation syntax only. Stop at common bio separators.
     affiliation_patterns = (
         r"\bmember\s+of\s+([^|,;\n]{2,100})",
         r"\baffiliated\s+with\s+([^|,;\n]{2,100})",
@@ -138,6 +147,16 @@ def extract_associations(
         if host.startswith("www."):
             host = host[4:]
         if host:
-            _add(bucket, "domain", host, source="bio_url", evidence=raw_url, confidence=0.95)
+            _add(
+                bucket,
+                "domain",
+                host,
+                source="bio_url",
+                evidence=raw_url,
+                confidence=0.95,
+            )
 
-    return sorted(bucket.values(), key=lambda row: (row.association_type, row.normalized_value))
+    return sorted(
+        bucket.values(),
+        key=lambda row: (row.association_type, row.normalized_value),
+    )
