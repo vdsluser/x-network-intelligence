@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>X Network Intelligence</title>
+  <link rel="stylesheet" href="/static/styles.css">
+  <link rel="modulepreload" href="/static/vendor/cytoscape.min.js">
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <p class="eyebrow">LOCAL NETWORK INTELLIGENCE</p>
+      <h1>X Network Intelligence</h1>
+    </div>
+    <div class="top-actions">
+      <span id="status-banner" class="status">데이터 불러오는 중…</span>
+      <button id="fit-button" type="button">화면 맞춤</button>
+    </div>
+  </header>
+
+  <main class="workspace">
+    <aside class="sidebar filters" aria-label="그래프 필터">
+      <section class="panel-section">
+        <h2>필터</h2>
+        <label>추적 대상
+          <select id="target-filter"><option value="">전체 Target</option></select>
+        </label>
+        <label>Topic
+          <select id="topic-filter"><option value="">전체 Topic</option></select>
+        </label>
+        <label>Account Type
+          <select id="type-filter"><option value="">전체 Type</option></select>
+        </label>
+        <label class="checkbox-row">
+          <input id="new-only" type="checkbox">
+          <span>신생계정만</span>
+        </label>
+        <label>신생계정 기준 (일)
+          <input id="new-days" type="number" min="0" value="90">
+        </label>
+        <label>최소 Target Coverage
+          <input id="coverage-filter" type="range" min="0" max="1" step="0.05" value="0">
+          <output id="coverage-value">0%</output>
+        </label>
+      </section>
+
+      <section class="panel-section">
+        <h2>보기</h2>
+        <label>노드 검색
+          <input id="search-input" type="search" placeholder="@username 또는 이름">
+        </label>
+        <label>Layout
+          <select id="layout-select">
+            <option value="cose">COSE</option>
+            <option value="concentric">Concentric</option>
+            <option value="circle">Circle</option>
+            <option value="breadthfirst">Breadthfirst</option>
+            <option value="grid">Grid</option>
+          </select>
+        </label>
+        <label>최대 Account
+          <input id="max-accounts" type="number" min="1" max="2000" value="500">
+        </label>
+        <button id="reload-button" class="primary" type="button">그래프 다시 계산</button>
+      </section>
+
+      <section class="legend panel-section" aria-label="범례">
+        <h2>범례</h2>
+        <div><span class="dot target"></span>Target</div>
+        <div><span class="dot account"></span>Account</div>
+        <div><span class="dot central"></span>Central</div>
+        <div><span class="dot bridge"></span>Bridge signal</div>
+        <p>중심·브리지 표시는 현재 표시된 관계망의 수치 신호이며 조직성이나 속성을 의미하지 않습니다.</p>
+      </section>
+    </aside>
+
+    <section class="graph-shell" aria-label="관계 그래프">
+      <div id="graph-summary" class="graph-summary"></div>
+      <div id="cy" role="application" aria-label="X 팔로잉 관계 그래프"></div>
+      <div id="empty-state" class="empty-state" hidden>
+        <strong>표시할 관계가 없습니다.</strong>
+        <span>필터를 완화하거나 Following Snapshot을 추가해보세요.</span>
+      </div>
+    </section>
+
+    <aside id="detail-panel" class="sidebar detail" aria-live="polite">
+      <div class="detail-placeholder">
+        <h2>상세 정보</h2>
+        <p>그래프에서 Target 또는 Account를 선택하면 근거와 분석 지표를 표시합니다.</p>
+      </div>
+    </aside>
+  </main>
+
+  <script type="module" src="/static/app.js"></script>
+</body>
+</html>
