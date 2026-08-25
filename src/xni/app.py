@@ -10,6 +10,14 @@ from .analysis.network import FollowingSimilarity, find_new_account_cohort_pairs
 from .analysis.profiles import AccountProfileSignal, find_new_account_candidates
 from .config import Settings, get_settings
 from .db import create_engine_for_path, init_database
+from .services.batch import BatchImportRequest, BatchImportResult, import_manual_batch
+from .services.expansion import (
+    ExpansionQueueItem,
+    ExpansionQueueRefresh,
+    list_expansion_queue,
+    promote_expansion_candidate,
+    refresh_expansion_queue,
+)
 from .services.snapshots import ImportSummary, import_manual_snapshot
 
 
@@ -36,6 +44,52 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return await import_manual_snapshot(engine, payload)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @application.post("/api/import/manual/batch", response_model=BatchImportResult)
+    async def manual_batch(request: BatchImportRequest) -> BatchImportResult:
+        try:
+            return await import_manual_batch(
+                engine,
+                request.payloads,
+                new_account_days=request.new_account_days,
+                low_following_max=request.low_following_max,
+                min_jaccard=request.min_jaccard,
+                min_shared=request.min_shared,
+                central_limit=request.central_limit,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @application.post("/api/expansion/queue/refresh", response_model=ExpansionQueueRefresh)
+    def expansion_refresh(
+        new_account_days: int = Query(default=90, ge=0),
+        low_following_max: int = Query(default=100, ge=0),
+    ) -> ExpansionQueueRefresh:
+        with Session(engine) as session:
+            return refresh_expansion_queue(
+                session,
+                as_of=datetime.now(timezone.utc),
+                new_account_days=new_account_days,
+                low_following_max=low_following_max,
+            )
+
+    @application.get("/api/expansion/queue", response_model=list[ExpansionQueueItem])
+    def expansion_queue(
+        status: str = Query(default="pending", pattern="^(pending|promoted)$"),
+    ) -> list[ExpansionQueueItem]:
+        with Session(engine) as session:
+            return list_expansion_queue(session, status=status)
+
+    @application.post(
+        "/api/expansion/queue/{candidate_id}/promote",
+        response_model=ExpansionQueueItem,
+    )
+    def expansion_promote(candidate_id: int) -> ExpansionQueueItem:
+        with Session(engine) as session:
+            try:
+                return promote_expansion_candidate(session, candidate_id)
+            except ValueError as exc:
+                raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     @application.get("/api/analysis/new-accounts", response_model=list[AccountProfileSignal])
     def new_accounts(
