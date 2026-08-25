@@ -6,6 +6,7 @@ from fastapi import FastAPI, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from .analysis.centrality import CentralNodeScore, rank_central_nodes
+from .analysis.fingerprint import FollowingFingerprint, build_following_fingerprint, build_following_fingerprints
 from .analysis.network import FollowingSimilarity, find_new_account_cohort_pairs, find_similarity_pairs
 from .analysis.profiles import AccountProfileSignal, find_new_account_candidates
 from .config import Settings, get_settings
@@ -137,6 +138,52 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     ) -> list[CentralNodeScore]:
         with Session(engine) as session:
             return rank_central_nodes(session, limit=limit)
+
+    @application.get("/api/analysis/fingerprints", response_model=list[FollowingFingerprint])
+    def fingerprints(
+        new_account_days: int = Query(default=90, ge=0),
+        low_following_max: int = Query(default=100, ge=0),
+        min_cohort_jaccard: float = Query(default=0.2, ge=0, le=1),
+        min_cohort_shared: int = Query(default=2, ge=0),
+        top_node_limit: int = Query(default=5, ge=1, le=50),
+    ) -> list[FollowingFingerprint]:
+        with Session(engine) as session:
+            return build_following_fingerprints(
+                session,
+                as_of=datetime.now(timezone.utc),
+                new_account_days=new_account_days,
+                low_following_max=low_following_max,
+                min_cohort_jaccard=min_cohort_jaccard,
+                min_cohort_shared=min_cohort_shared,
+                top_node_limit=top_node_limit,
+            )
+
+    @application.get(
+        "/api/analysis/fingerprints/{target_username}",
+        response_model=FollowingFingerprint,
+    )
+    def fingerprint(
+        target_username: str,
+        new_account_days: int = Query(default=90, ge=0),
+        low_following_max: int = Query(default=100, ge=0),
+        min_cohort_jaccard: float = Query(default=0.2, ge=0, le=1),
+        min_cohort_shared: int = Query(default=2, ge=0),
+        top_node_limit: int = Query(default=5, ge=1, le=50),
+    ) -> FollowingFingerprint:
+        with Session(engine) as session:
+            try:
+                return build_following_fingerprint(
+                    session,
+                    target_username,
+                    as_of=datetime.now(timezone.utc),
+                    new_account_days=new_account_days,
+                    low_following_max=low_following_max,
+                    min_cohort_jaccard=min_cohort_jaccard,
+                    min_cohort_shared=min_cohort_shared,
+                    top_node_limit=top_node_limit,
+                )
+            except ValueError as exc:
+                raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     return application
 

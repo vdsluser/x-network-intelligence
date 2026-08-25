@@ -93,6 +93,29 @@ Sorsa 형태의 `users`, `targetLabel`, `mode: "following"` JSON을 `POST /api/i
 
 활성 `Target → Account` 관계를 NetworkX graph로 구성해 `followed_by_targets`, `target_coverage`, `betweenness`를 반환합니다. 여러 타깃의 Snapshot이 쌓일수록 의미가 커집니다.
 
+### Following Fingerprint
+
+각 활성 Target의 현재 관계망을 하나의 비교 가능한 프로필로 계산합니다. 별도 캐시 테이블을 만들지 않고 현재 SQLite 관계 데이터를 기준으로 즉시 계산합니다.
+
+- `GET /api/analysis/fingerprints` — 모든 활성 Target의 Fingerprint 조회
+- `GET /api/analysis/fingerprints/{target_username}` — 한 Target의 Fingerprint 조회
+
+주요 필드:
+
+- `following_count` — 현재 관측된 활성 Following 수
+- `new_account_count`, `new_account_ratio` — 설정한 기간 기준 신생계정 수와 비율
+- `new_low_following_count`, `new_low_following_ratio` — 신생계정 중 팔로잉 수도 설정 기준 이하인 계정 수와 비율
+- `shared_following_count` — 다른 활성 Target도 함께 팔로우하는 계정 수
+- `shared_network_concentration` — 전체 Following 중 공통 관계망 계정이 차지하는 비율
+- `most_similar_target` — Following Jaccard가 가장 높은 다른 Target
+- `similarity_jaccard`, `similarity_shared_count` — 최고 유사 Target과의 유사도 근거
+- `cohort_peers`, `cohort_peer_count` — 설정 기준을 만족하는 신생계정 Cohort 연결
+- `top_central_nodes` — 해당 Target이 팔로우하는 계정 중 전체 관계망에서 중심성이 높은 노드
+
+예: `GET /api/analysis/fingerprints/alpha?new_account_days=90&low_following_max=100&top_node_limit=5`
+
+`shared_network_concentration`은 주제나 정치 성향의 집중도를 뜻하지 않습니다. 현재 단계에서는 **여러 추적 Target 사이에서 실제 Following 관계가 얼마나 겹치는지**만 나타내는 관찰 가능한 네트워크 지표입니다. 주제 기반 관심사 집중도는 Topic Classification 기능이 추가된 뒤 별도 지표로 확장합니다.
+
 ## SQLite에 보존하는 데이터
 
 - `targets` — 추적 대상
@@ -112,7 +135,7 @@ Sorsa 형태의 `users`, `targetLabel`, `mode: "following"` JSON을 `POST /api/i
 5. ✅ New Account Cohort Pair Detection
 6. ✅ Central Node / Bridge Signal
 7. ✅ Network Expansion Queue / Target Promotion / Batch Import
-8. Following Fingerprint
+8. ✅ Following Fingerprint
 9. Topic & Public Association Classification
 10. Local Relationship Graph UI
 11. Network Trend / Rising Node Analysis
@@ -140,7 +163,7 @@ Sorsa 형태의 `users`, `targetLabel`, `mode: "following"` JSON을 `POST /api/i
 
 ## 현재 상태
 
-**STEP 4 — Network Expansion Queue**
+**STEP 5 — Following Fingerprint**
 
 현재 구현:
 
@@ -153,4 +176,5 @@ Sorsa 형태의 `users`, `targetLabel`, `mode: "following"` JSON을 `POST /api/i
 - Expansion Queue pending/promoted 관리
 - 후보 → 로컬 Target 승격
 - Batch Import 후 자동 Queue 갱신 및 네트워크 분석 요약
+- Target별 Following Fingerprint 및 전체 Fingerprint 조회
 - pytest 회귀 테스트
