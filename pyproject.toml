@@ -1,32 +1,16 @@
 [build-system]
 requires = ["setuptools>=75"]
 build-backend = "setuptools.build_meta"
-
 [project]
 name = "x-network-intelligence"
 version = "0.1.0"
-description = "Local-first X following network intelligence and graph analysis"
-readme = "README.md"
 requires-python = ">=3.12"
-dependencies = [
-  "fastapi>=0.115,<1",
-  "uvicorn[standard]>=0.32,<1",
-  "sqlalchemy>=2.0,<3",
-  "pydantic>=2.9,<3",
-  "httpx>=0.28,<1",
-  "networkx>=3.4,<4",
-  "pandas>=2.2,<3",
-  "scikit-learn>=1.5,<2",
-]
-
-[project.optional-dependencies]
-dev = [
-  "pytest>=8.3,<10",
-]
-
+dependencies = ["fastapi>=0.115,<1","sqlalchemy>=2.0,<3","pydantic>=2.9,<3","httpx>=0.28,<1","networkx>=3.4,<4"]
 [tool.setuptools.packages.find]
 where = ["src"]
-
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
+
+[tool.setuptools.package-data]
+xni = ["web/*.html", "web/*.css", "web/*.js", "web/vendor/*.b64.part*", "web/vendor/*.txt"]
