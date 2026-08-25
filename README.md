@@ -42,60 +42,66 @@ python -m xni
 
 Sorsa 형태의 `users`, `targetLabel`, `mode: "following"` JSON을 `POST /api/import/manual`에 전달합니다. 원본 payload와 각 user JSON을 SQLite에 함께 보존하고, 두 번째 Snapshot부터 `added / removed / unchanged`를 계산합니다.
 
+## Network Expansion Queue
+
+신생·저팔로잉 후보를 로컬 추적 대상으로 확장하는 워크플로를 제공합니다.
+
+```text
+관측 Account
+  → New Account 후보 판별
+  → Expansion Queue(pending)
+  → 사용자가 Target으로 승격
+  → 해당 Target의 Following JSON 수집
+  → Batch Import
+  → Similarity / Cohort / Central Node 재분석
+```
+
+주요 API:
+
+- `POST /api/expansion/queue/refresh` — 현재 계정 데이터에서 후보 큐 갱신
+- `GET /api/expansion/queue?status=pending` — 대기 후보 조회
+- `POST /api/expansion/queue/{candidate_id}/promote` — 후보를 로컬 Target으로 승격
+- `POST /api/import/manual/batch` — 여러 Target JSON을 순차 저장하고 큐/분석 요약 반환
+
+`promote`는 X에서 실제 Follow를 수행하거나 외부 서비스에 요청하지 않습니다. SQLite의 로컬 `targets` 테이블에 추적 대상을 등록하는 동작만 수행합니다.
+
+배치 요청은 `payloads`, `new_account_days`, `low_following_max`, `min_jaccard`, `min_shared`, `central_limit`을 받을 수 있습니다. 응답에는 각 Import 결과, Queue 갱신 결과, Target 수, 활성 관계 수, Similarity/Cohort 쌍 수와 상위 Central Node가 포함됩니다.
+
 ## 분석 API
 
 ### 신생·저팔로잉 후보
 
-```text
-GET /api/analysis/new-accounts?new_account_days=90&low_following_max=100
-```
+`GET /api/analysis/new-accounts?new_account_days=90&low_following_max=100`
 
 계정 생성일과 현재 팔로잉 수만 사용합니다. `90일`, `100`은 판정 사실이 아니라 사용자가 바꿀 수 있는 분석 기준값입니다.
 
 ### Following 유사도
 
-```text
-GET /api/analysis/similarity?min_jaccard=0.2&min_shared=2
-```
+`GET /api/analysis/similarity?min_jaccard=0.2&min_shared=2`
 
-두 추적 대상의 활성 Following 집합을 비교해 다음 근거를 반환합니다.
-
-- `shared_count`
-- `union_count`
-- `jaccard`
-- `overlap_a`
-- `overlap_b`
+두 추적 대상의 활성 Following 집합을 비교해 `shared_count`, `union_count`, `jaccard`, `overlap_a`, `overlap_b`를 반환합니다.
 
 ### 신생계정 Cohort 후보
 
-```text
-GET /api/analysis/cohorts?new_account_days=90&low_following_max=100&min_jaccard=0.2&min_shared=2
-```
+`GET /api/analysis/cohorts?new_account_days=90&low_following_max=100&min_jaccard=0.2&min_shared=2`
 
-신생·저팔로잉 후보 중 **둘 다 실제 추적 대상으로 Following Snapshot이 축적된 경우**에만 관계 유사도를 비교합니다. 높은 점수는 관계망 유사성 신호이며 조직성이나 동일 세력을 의미한다고 단정하지 않습니다.
+신생·저팔로잉 후보 중 둘 다 실제 추적 대상으로 Following Snapshot이 축적된 경우에만 관계 유사도를 비교합니다. 높은 점수는 관계망 유사성 신호이며 조직성이나 동일 세력을 의미한다고 단정하지 않습니다.
 
 ### 중심노드
 
-```text
-GET /api/analysis/central-nodes?limit=20
-```
+`GET /api/analysis/central-nodes?limit=20`
 
-활성 `Target → Account` 관계를 NetworkX bipartite graph로 구성해 다음 값을 반환합니다.
-
-- `followed_by_targets`: 몇 개의 추적 대상이 해당 계정을 팔로우하는지
-- `target_coverage`: 전체 추적 대상 중 연결 비율
-- `betweenness`: 관계망에서 매개 경로에 위치하는 정도
-
-추적 대상이 1개뿐이면 모든 연결 계정의 `target_coverage`가 1.0이므로 중심노드 비교의 의미가 제한됩니다. 여러 타깃의 Snapshot이 쌓일수록 가치가 커집니다.
+활성 `Target → Account` 관계를 NetworkX graph로 구성해 `followed_by_targets`, `target_coverage`, `betweenness`를 반환합니다. 여러 타깃의 Snapshot이 쌓일수록 의미가 커집니다.
 
 ## SQLite에 보존하는 데이터
 
 - `targets` — 추적 대상
 - `accounts` — 발견된 X 계정과 최신 공개 메타데이터
 - `following_snapshots` — 수집 시점과 전체 원본 JSON
-- `snapshot_members` — 각 Snapshot에 포함된 계정과 해당 원본 user JSON
-- `target_relationships` — 현재 활성/비활성 팔로잉 관계와 최초/최근 관측 시점
+- `snapshot_members` — 각 Snapshot 계정과 원본 user JSON
+- `target_relationships` — 활성/비활성 팔로잉 관계
 - `relationship_events` — added / removed 변화 이벤트
+- `expansion_candidates` — 신생·저팔로잉 확장 후보와 pending/promoted 상태
 
 ## 핵심 기능 로드맵
 
@@ -105,10 +111,11 @@ GET /api/analysis/central-nodes?limit=20
 4. ✅ Following Similarity
 5. ✅ New Account Cohort Pair Detection
 6. ✅ Central Node / Bridge Signal
-7. Following Fingerprint
-8. Topic & Public Association Classification
-9. Local Relationship Graph UI
-10. Network Trend / Rising Node Analysis
+7. ✅ Network Expansion Queue / Target Promotion / Batch Import
+8. Following Fingerprint
+9. Topic & Public Association Classification
+10. Local Relationship Graph UI
+11. Network Trend / Rising Node Analysis
 
 ## 분석 원칙
 
@@ -129,22 +136,21 @@ GET /api/analysis/central-nodes?limit=20
 ## 문서
 
 - [Project Plan](docs/PROJECT_PLAN.md)
-- [Python Local MVP Implementation Plan](docs/superpowers/plans/2026-08-25-python-local-mvp.md)
-- [Manual Import + Snapshot Diff Plan](docs/superpowers/plans/2026-08-25-manual-import-snapshot.md)
-- [Network Analysis Core Plan](docs/superpowers/plans/2026-08-25-network-analysis-core.md)
+- [Network Expansion Queue Plan](docs/superpowers/plans/2026-08-25-network-expansion-queue.md)
 
 ## 현재 상태
 
-**STEP 3 — Network Analysis Core**
+**STEP 4 — Network Expansion Queue**
 
 현재 구현:
 
 - `python -m xni` 로컬 실행
-- FastAPI `/api/health`
-- FastAPI `POST /api/import/manual`
-- Snapshot + Relationship Diff
+- FastAPI Snapshot Import / Batch Import
+- SQLite Snapshot + Relationship Diff
 - 신생·저팔로잉 후보 분석
-- Following Jaccard 유사도
-- 신생계정 Cohort 후보 pair
+- Following Jaccard 유사도 / Cohort 후보
 - NetworkX 중심노드 / betweenness 신호
+- Expansion Queue pending/promoted 관리
+- 후보 → 로컬 Target 승격
+- Batch Import 후 자동 Queue 갱신 및 네트워크 분석 요약
 - pytest 회귀 테스트
